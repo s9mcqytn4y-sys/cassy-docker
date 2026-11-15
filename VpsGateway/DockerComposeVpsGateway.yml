@@ -1,0 +1,83 @@
+# Hostinger VPS 24/7 Gateway Stack for Cassy + Hermes + n8n + Redis
+# Topology:
+# - Public HTTPS traffic terminates at Cloudflare Tunnel / Caddy TLS (only port 443 public)
+# - Internal admin / Hermes gateway / n8n bind strictly to loopback 127.0.0.1 or Tailscale IP
+# - PostgreSQL 18 and Redis 8 are NEVER exposed on 0.0.0.0
+
+services:
+  redis-gateway:
+    image: redis:8.0-alpine
+    container_name: CassyVpsRedis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_gateway_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - cassy_mesh
+
+  n8n:
+    image: n8nio/n8n:1.88.0
+    container_name: CassyVpsN8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-n8n.internal.ts.net}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
+      - GENERIC_TIMEZONE=Asia/Jakarta
+      - TZ=Asia/Jakarta
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cassy_mesh
+
+  hermes-gateway:
+    image: python:3.12-slim
+    container_name: CassyVpsHermesGateway
+    restart: unless-stopped
+    working_dir: /opt/hermes
+    command: ["sh", "-c", "pip install --no-cache-dir uv && uv tool run hermes-agent gateway"]
+    ports:
+      - "127.0.0.1:8642:8642"
+      - "127.0.0.1:9119:9119"
+    env_file:
+      - .env.vps-gateway
+    environment:
+      - TZ=Asia/Jakarta
+      - API_SERVER_HOST=127.0.0.1
+      - API_SERVER_PORT=8642
+    volumes:
+      - hermes_home:/root/.hermes
+    depends_on:
+      redis-gateway:
+        condition: service_healthy
+    networks:
+      - cassy_mesh
+
+volumes:
+  redis_gateway_data:
+    name: CassyRedisGatewayData
+  n8n_data:
+    name: CassyN8nData
+  hermes_home:
+    name: CassyHermesHome
+
+networks:
+  cassy_mesh:
+    name: CassyMeshNet
+    driver: bridge

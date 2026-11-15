@@ -1,0 +1,316 @@
+# MyCaffe POS Platform - Production Docker Compose
+# Architecture: Single-VPS Modular Monolith (Hostinger KVM 2: 2 vCPU, 8 GB RAM, 100 GB NVMe)
+# Target OS: Ubuntu 24.04 LTS
+# Pulls GHCR images by digest (immutable) via scripts/deploy/deploy.sh; no source compilation on the VPS.
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: CassyPostgresProd
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME must be set}
+      POSTGRES_USER: ${DB_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?DB_SUPERUSER_PASSWORD must be set}
+      DB_MIGRATOR_USER: ${DB_MIGRATOR_USER:?DB_MIGRATOR_USER must be set}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?DB_MIGRATOR_PASSWORD must be set}
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
+    command: >
+      postgres
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c maintenance_work_mem=256MB
+      -c work_mem=16MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c log_destination=stderr
+      -c logging_collector=off
+      -c log_min_messages=warning
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ../Postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
+    networks:
+      - cassy-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_MIGRATOR_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.25'
+          memory: 3500M
+        reservations:
+          cpus: '0.5'
+          memory: 1024M
+
+  redis:
+    image: redis:8-alpine
+    container_name: CassyRedisProd
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - cassy-data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 96M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+
+  migrate:
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
+    container_name: CassyMigrateProd
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: "production"
+      DATABASE_MIGRATION_URL: ${COMPOSE_DATABASE_MIGRATION_URL:?COMPOSE_DATABASE_MIGRATION_URL must be set}
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
+    entrypoint: ["/app/mycaffe-migrate", "-action=up", "-dir=/app/db/migrations"]
+    networks:
+      - cassy-data
+
+  api:
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-api@${API_IMAGE_DIGEST:?API_IMAGE_DIGEST must be set (use scripts/deploy/deploy.sh)}
+    container_name: CassyApiProd
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: "8080"
+      APP_ENV: "production"
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL must be set}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
+      # Only the edge network (Nginx) may set X-Forwarded-For; keeps ClientIP() unspoofable.
+      TRUSTED_PROXIES: ${EDGE_SUBNET:-172.30.0.0/24}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set}
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      JWT_EXPIRED_HOURS: ${JWT_EXPIRED_HOURS:-24}
+      MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:?MIDTRANS_MERCHANT_ID must be set}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:?MIDTRANS_SERVER_KEY must be set}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:?MIDTRANS_CLIENT_KEY must be set}
+      MIDTRANS_IS_PRODUCTION: "true"
+      # Hostinger mailbox (smtp.hostinger.com:465, implicit TLS). The API refuses to start without it.
+      EMAIL_DRIVER: smtp
+      SMS_DRIVER: ${SMS_DRIVER:-disabled}
+      SMS_EMAIL_TO: ${SMS_EMAIL_TO:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v21.0}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_RECEIPT_TEMPLATE: ${WHATSAPP_RECEIPT_TEMPLATE:-struk_digital}
+      WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-id}
+      WHATSAPP_DRIVER: ${WHATSAPP_DRIVER:-}
+      GUEST_SPLIT_ENABLED: ${GUEST_SPLIT_ENABLED:-false}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      WHATSAPP_BRIDGE_URL: ${WHATSAPP_BRIDGE_URL:-}
+      WHATSAPP_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME must be set}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD must be set}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS must be set}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cassy}
+      MIDTRANS_QRIS_ACQUIRER: ${MIDTRANS_QRIS_ACQUIRER:-gopay}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:?APP_PUBLIC_URL must be set}
+      # Slug created by cmd/migrate -action=bootstrap-store; empty for multi-branch.
+      DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-r2}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-mycaffe-media}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-mycaffe-private-media}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: "production"
+      # Scraped by alloy over cassy-metrics; no host port and no Nginx route.
+      METRICS_ADDR: ":9091"
+    networks:
+      - cassy-edge
+      - cassy-data
+      - cassy-metrics
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  web:
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-web@${WEB_IMAGE_DIGEST:-}
+    container_name: CassyWebProd
+    # Optional until the frontend exists (decision W3): deploy.sh enables the profile when a web digest is given.
+    profiles: ["web"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      PORT: "3000"
+    networks:
+      - cassy-edge
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1536M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: CassyNginxProd
+    restart: unless-stopped
+    logging: *default-logging
+    # No published ports (IN1, P0-07): only the tunnel reaches Nginx on the edge network.
+    volumes:
+      - ../Nginx/NginxProd.conf:/etc/nginx/nginx.conf:ro
+      # Static 503 pages and the maintenance.on switch (scripts/deploy/maintenance.sh).
+      - ../Nginx/Maintenance:/etc/nginx/maintenance:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - cassy-edge
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Named Cloudflare Tunnel (IN1, P0-07): outbound-only ingress, TLS at the edge, zero inbound ports.
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.2
+    container_name: CassyTunnelProd
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN must be set (docs/Setup/Deploy.md)}
+    depends_on:
+      nginx:
+        condition: service_healthy
+    networks:
+      - cassy-edge
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # Metrics shipper (decision IN3, docs/Setup/Monitoring.md): API + host metrics to Grafana Cloud.
+  # Host paths are read-only; no docker.sock.
+  alloy:
+    image: grafana/alloy:v1.21.2
+    container_name: CassyAlloyProd
+    restart: unless-stopped
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    environment:
+      MYCAFFE_CLIENT: ${MYCAFFE_CLIENT:?MYCAFFE_CLIENT must be set}
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:?GRAFANA_CLOUD_PROM_URL must be set}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:?GRAFANA_CLOUD_PROM_USER must be set}
+      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY:?GRAFANA_CLOUD_API_KEY must be set}
+    volumes:
+      - ../Monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+      - /var/lib/mycaffe/metrics:/host/textfile:ro
+    networks:
+      - cassy-metrics
+      - cassy-monitor-egress
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  pgdata:
+    name: CassyProdPgData
+    driver: local
+  alloy-data:
+    name: CassyAlloyData
+
+networks:
+  cassy-edge:
+    name: CassyProdEdgeNet
+    driver: bridge
+    # Fixed subnet so the API can trust exactly this proxy hop (TRUSTED_PROXIES).
+    # Changing it on an existing host requires `docker compose down` to recreate the network.
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.30.0.0/24}
+  cassy-data:
+    name: CassyProdDataNet
+    driver: bridge
+    internal: true
+  # api <-> alloy only, so the scrape never crosses the edge or data networks.
+  cassy-metrics:
+    name: CassyProdMetricsNet
+    driver: bridge
+    internal: true
+  # alloy's outbound HTTPS to Grafana Cloud.
+  cassy-monitor-egress:
+    name: CassyMonitorEgressNet
+    driver: bridge

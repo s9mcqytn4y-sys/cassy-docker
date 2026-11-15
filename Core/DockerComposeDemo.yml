@@ -1,0 +1,217 @@
+# MyCaffe POS Platform - Demo / Staging stack for a local workstation
+# Builds from source locally (never on the production VPS), runs migrations + idempotent
+# development seed, and exposes Nginx through a Cloudflare Quick Tunnel (random
+# https://*.trycloudflare.com URL, no Cloudflare account needed).
+#
+# Every long-running service uses restart: unless-stopped + healthchecks, so Docker
+# restarts it after a crash and after Docker Desktop starts again (enable
+# "Start Docker Desktop when you sign in" for reboot survival).
+#
+# APP_ENV=staging: every route is live and Midtrans stays in sandbox. The stack refuses to start
+# without JWT_SECRET_KEY, DEMO_OWNER_PIN and DEMO_STAFF_PIN in .env.demo (leaks L-1, L-2).
+#
+# Usage: see docs/Setup/DemoStagingEnvironment.md
+
+name: cassy-demo
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cassy_demo}
+      POSTGRES_USER: ${DB_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:-cassy_demo_super_password}
+      DB_MIGRATOR_USER: ${DB_MIGRATOR_USER:-cassy_migrator}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:-cassy_demo_migrator_password}
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-cassy_demo_app_password}
+    volumes:
+      - demo-pgdata:/var/lib/postgresql
+      - ../Postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
+    networks:
+      - cassy-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_MIGRATOR_USER:-cassy_migrator} -d ${DB_NAME:-cassy_demo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - cassy-data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  migrate:
+    build:
+      context: ${CASSY_BACKEND_DIR:-../../CassyBackend}
+      dockerfile: deploy/docker/Dockerfile
+    image: cassy-api:demo
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: staging
+      DATABASE_MIGRATION_URL: postgres://${DB_MIGRATOR_USER:-cassy_migrator}:${DB_MIGRATOR_PASSWORD:-cassy_demo_migrator_password}@postgres:5432/${DB_NAME:-cassy_demo}?sslmode=disable
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-cassy_demo_app_password}
+      # The seed PIN 482913 is public; demo-pins replaces it (L-1). Set both in .env.demo.
+      DEMO_OWNER_PIN: ${DEMO_OWNER_PIN:?set DEMO_OWNER_PIN in .env.demo}
+      DEMO_STAFF_PIN: ${DEMO_STAFF_PIN:?set DEMO_STAFF_PIN in .env.demo}
+    volumes:
+      - ${CASSY_BACKEND_DIR:-../../CassyBackend}/db/seeds:/app/db/seeds:ro
+    # Both actions are idempotent, so this is safe on every `up`.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /app/mycaffe-migrate -action=up -dir=/app/db/migrations && /app/mycaffe-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/mycaffe-migrate -action=demo-pins -store-slug=central-cafe,express-counter
+    networks:
+      - cassy-data
+
+  api:
+    image: cassy-api:demo
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: "8080"
+      APP_ENV: staging
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      # Nginx and cloudflared live on the fixed edge subnet; trust only that hop chain.
+      TRUSTED_PROXIES: ${DEMO_EDGE_SUBNET:-172.29.10.0/24}
+      DATABASE_URL: postgres://${DB_APP_USER:-cassy_app}:${DB_APP_PASSWORD:-cassy_demo_app_password}@postgres:5432/${DB_NAME:-cassy_demo}?sslmode=disable
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-cassy_demo_app_password}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env.demo (openssl rand -hex 32)}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      PLATFORM_ADMIN_API_KEY: ${PLATFORM_ADMIN_API_KEY:-}
+      PLATFORM_MIDTRANS_SERVER_KEY: ${PLATFORM_MIDTRANS_SERVER_KEY:-}
+      PLATFORM_MIDTRANS_CLIENT_KEY: ${PLATFORM_MIDTRANS_CLIENT_KEY:-}
+      PLATFORM_MIDTRANS_IS_PRODUCTION: ${PLATFORM_MIDTRANS_IS_PRODUCTION:-false}
+      MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:-G000000000}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-SB-Mid-server-demo-placeholder}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-SB-Mid-client-demo-placeholder}
+      MIDTRANS_IS_PRODUCTION: "false"
+      # Email: log driver by default; set SMTP_* (Gmail app password) to really send.
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-log}
+      SMS_DRIVER: ${SMS_DRIVER:-disabled} # log is refused in staging (docs/Setup/Sms.md); use email or webhook for demo
+      SMS_EMAIL_TO: ${SMS_EMAIL_TO:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v21.0}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_RECEIPT_TEMPLATE: ${WHATSAPP_RECEIPT_TEMPLATE:-struk_digital}
+      WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-id}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cassy Demo}
+      MIDTRANS_QRIS_ACQUIRER: ${MIDTRANS_QRIS_ACQUIRER:-gopay}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
+      DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-mycaffe-media}
+      R2_PRIVATE_BUCKET_NAME: ${R2_PRIVATE_BUCKET_NAME:-mycaffe-private-media}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-staging}
+    networks:
+      - cassy-edge
+      - cassy-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "127.0.0.1:${DEMO_HTTP_PORT:-8088}:80"
+    volumes:
+      - ../Nginx/NginxDemo.conf:/etc/nginx/nginx.conf:ro
+    # Next.js dev server runs on the Windows host (owner decision I3: one origin for POS + API).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - cassy-edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.2
+    restart: unless-stopped
+    # Named Tunnel (mycaffe-demo -> https://demo.abbdullaziz.online) when CLOUDFLARE_TUNNEL_TOKEN is set.
+    # For an ephemeral Quick Tunnel without a token, set CLOUDFLARE_TUNNEL_COMMAND="--url http://nginx:80".
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 ${CLOUDFLARE_TUNNEL_COMMAND:-run}
+    depends_on:
+      nginx:
+        condition: service_healthy
+    networks:
+      - cassy-edge
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  demo-pgdata:
+    name: CassyDemoPgData
+
+networks:
+  cassy-edge:
+    name: CassyDemoEdgeNet
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${DEMO_EDGE_SUBNET:-172.29.10.0/24}
+  cassy-data:
+    name: CassyDemoDataNet
+    driver: bridge
+    internal: true

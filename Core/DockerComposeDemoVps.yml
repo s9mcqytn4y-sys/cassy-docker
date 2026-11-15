@@ -1,0 +1,45 @@
+# Override for the demo host (decision W2: WSL Ubuntu run like a VPS). Layered on top of
+# docker-compose.prod.yml by deploy.sh and compose.sh when DEPLOY_COMPOSE_OVERRIDE points here.
+# Same images, network and tunnel as production; only the environment flags differ:
+# staging config, Midtrans sandbox, no Grafana agent until a Grafana Cloud stack exists.
+services:
+  migrate:
+    environment:
+      APP_ENV: "staging"
+
+  api:
+    environment:
+      APP_ENV: "staging"
+      MIDTRANS_IS_PRODUCTION: "false"
+      SENTRY_ENVIRONMENT: "staging"
+      # Demo WhatsApp receipts through the whatsmeow bridge (W12); production uses the Cloud API.
+      WHATSAPP_DRIVER: "bridge"
+      WHATSAPP_BRIDGE_URL: "http://wa-bridge:8090"
+      WHATSAPP_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:?WHATSAPP_BRIDGE_TOKEN must be set on the demo host}
+
+  tunnel:
+    environment:
+      # QUIC (UDP 7844) drops behind the WSL NAT and Cloudflare WARP; HTTP/2 over TCP 443 holds.
+      TUNNEL_TRANSPORT_PROTOCOL: "http2"
+
+  alloy:
+    profiles: ["monitoring"]
+
+  # Pair once: `compose.sh logs -f wa-bridge`, then scan the QR from WhatsApp > Linked devices on the demo phone.
+  wa-bridge:
+    image: ghcr.io/s9mcqytn4y-sys/mycaffe-wa-bridge@${WA_BRIDGE_IMAGE_DIGEST:?WA_BRIDGE_IMAGE_DIGEST must be set on the demo host}
+    container_name: CassyWaBridgeDemo
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      WA_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:?WHATSAPP_BRIDGE_TOKEN must be set on the demo host}
+    volumes:
+      - wa-bridge-data:/data
+    networks:
+      - cassy-edge
+
+volumes:
+  wa-bridge-data:
+    name: CassyWaBridgeDemoData

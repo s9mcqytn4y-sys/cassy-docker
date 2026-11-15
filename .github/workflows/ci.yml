@@ -1,0 +1,56 @@
+name: Docker Infrastructure CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-compose-and-nginx:
+    name: Validate Compose Stacks & Nginx Configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Compose configurations
+        env:
+          DB_NAME: cassy_prod
+          DB_SUPERUSER_PASSWORD: ci_super_password
+          DB_MIGRATOR_USER: cassy_migrator
+          DB_MIGRATOR_PASSWORD: ci_migrator_password
+          DB_APP_PASSWORD: ci_app_password
+          COMPOSE_DATABASE_MIGRATION_URL: postgres://cassy_migrator:ci@postgres:5432/cassy_prod?sslmode=disable
+          COMPOSE_DATABASE_URL: postgres://cassy_app:ci@postgres:5432/cassy_prod?sslmode=disable
+          API_IMAGE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          JWT_SECRET_KEY: ci-jwt-secret-key-minimum-32-characters
+          FRONTEND_URL: https://demo.abbdullaziz.online
+          APP_PUBLIC_URL: https://demo.abbdullaziz.online
+          ALLOWED_ORIGINS: https://demo.abbdullaziz.online
+          EMAIL_FROM_ADDRESS: noreply@cassy.id
+          SMTP_USERNAME: ci@cassy.id
+          SMTP_PASSWORD: ci_smtp_password
+          MYCAFFE_CLIENT: cassy-prod
+          GRAFANA_CLOUD_PROM_URL: https://example.invalid
+          GRAFANA_CLOUD_PROM_USER: ci
+          GRAFANA_CLOUD_API_KEY: ci
+          CLOUDFLARE_TUNNEL_TOKEN: ci
+          MIDTRANS_MERCHANT_ID: G000000000
+          MIDTRANS_SERVER_KEY: SB-Mid-server-ci
+          MIDTRANS_CLIENT_KEY: SB-Mid-client-ci
+          DEMO_OWNER_PIN: "482913"
+          DEMO_STAFF_PIN: "482914"
+          N8N_ENCRYPTION_KEY: ci-n8n-encryption-key-minimum-32-chars
+          WA_BRIDGE_IMAGE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          WHATSAPP_BRIDGE_TOKEN: ci
+        run: |
+          docker compose -f Core/DockerComposeDev.yml config -q
+          docker compose -f Core/DockerComposeDemo.yml config -q
+          docker compose -f Core/DockerComposeProd.yml config -q
+          docker compose -f Core/DockerComposeProd.yml -f Core/DockerComposeDemoVps.yml config -q
+          touch VpsGateway/.env.vps-gateway
+          docker compose -f VpsGateway/DockerComposeVpsGateway.yml config -q
+          rm -f VpsGateway/.env.vps-gateway
+
+      - name: Validate Postgres init script syntax
+        run: sh -n Postgres/00-init-roles.sh

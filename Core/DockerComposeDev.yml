@@ -1,0 +1,131 @@
+# Cassy by AzureDevID - Local Development Docker Compose
+# Uses official PostgreSQL 18 volume layout (/var/lib/postgresql) and HTTP :80 reverse proxy.
+# For production VPS deployment, use Core/DockerComposeProd.yml.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: CassyPostgresDev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cassy_dev}
+      POSTGRES_USER: ${DB_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:-cassy_local_super_password}
+      DB_MIGRATOR_USER: ${DB_MIGRATOR_USER:-cassy_migrator}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:-cassy_local_migrator_password}
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-cassy_local_app_password}
+      DB_BACKUP_USER: ${DB_BACKUP_USER:-cassy_backup}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ../Postgres/00-init-roles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
+    networks:
+      - cassy-edge
+      - cassy-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_MIGRATOR_USER:-cassy_migrator} -d ${DB_NAME:-cassy_dev}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  api:
+    build:
+      context: ${CASSY_BACKEND_DIR:-../../CassyBackend}
+      dockerfile: deploy/docker/Dockerfile
+    container_name: CassyApiDev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      APP_ENV: ${APP_ENV:-development}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      DATABASE_URL: postgres://${DB_APP_USER:-cassy_app}:${DB_APP_PASSWORD:-cassy_local_app_password}@postgres:5432/${DB_NAME:-cassy_dev}?sslmode=disable
+      DATABASE_MIGRATION_URL: postgres://${DB_MIGRATOR_USER:-cassy_migrator}:${DB_MIGRATOR_PASSWORD:-cassy_local_migrator_password}@postgres:5432/${DB_NAME:-cassy_dev}?sslmode=disable
+      DB_APP_USER: ${DB_APP_USER:-cassy_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-cassy_local_app_password}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-local-jwt-secret-key-minimum-32-chars}
+      JWT_EXPIRED_HOURS: ${JWT_EXPIRED_HOURS:-24}
+      MIDTRANS_MERCHANT_ID: ${MIDTRANS_MERCHANT_ID:-G000000000}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-SB-Mid-server-local-dev-key}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-SB-Mid-client-local-dev-key}
+      MIDTRANS_IS_PRODUCTION: "false"
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-log}
+      SMS_DRIVER: ${SMS_DRIVER:-log}
+      SMS_EMAIL_TO: ${SMS_EMAIL_TO:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v21.0}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_RECEIPT_TEMPLATE: ${WHATSAPP_RECEIPT_TEMPLATE:-struk_digital}
+      WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-id}
+      WHATSAPP_DRIVER: ${WHATSAPP_DRIVER:-}
+      WHATSAPP_BRIDGE_URL: ${WHATSAPP_BRIDGE_URL:-}
+      WHATSAPP_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cassy Demo}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8088}
+      DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+    networks:
+      - cassy-edge
+      - cassy-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: CassyNginxDev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-80}:80"
+    volumes:
+      - ../Nginx/Nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - cassy-edge
+
+  wa-bridge:
+    build:
+      context: ${CASSY_BACKEND_DIR:-../../CassyBackend}/cmd/wa-bridge
+    container_name: CassyWaBridgeDev
+    profiles: ["whatsapp"]
+    environment:
+      WA_BRIDGE_TOKEN: ${WHATSAPP_BRIDGE_TOKEN:-}
+    volumes:
+      - wa-bridge-data:/data
+    networks:
+      - cassy-edge
+
+volumes:
+  wa-bridge-data:
+    name: CassyWaBridgeData
+  pgdata:
+    name: CassyPgData
+    driver: local
+
+networks:
+  cassy-edge:
+    name: CassyEdgeNet
+    driver: bridge
+  cassy-data:
+    name: CassyDataNet
+    driver: bridge
+    internal: true
