@@ -2,9 +2,16 @@ name: Docker Infrastructure CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**", "fix/**", "docs/**", "chore/**"]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate-compose-and-nginx:

@@ -82,7 +82,6 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mycaffe_app') THEN
             CREATE ROLE mycaffe_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
         END IF;
-        EXECUTE format('GRANT mycaffe_app TO %I WITH INHERIT TRUE', a_user);
         EXECUTE format('GRANT mycaffe_app TO %I WITH INHERIT FALSE, SET TRUE', m_user);
     END IF;
 
