@@ -1,12 +1,12 @@
-# /etc/cron.d/mycaffe-backup on the WSL demo host. Same jobs as deploy/backup/mycaffe-backup.cron;
-# purge goes through compose.sh so the demo-vps override (staging) applies. Times are UTC.
+# /etc/cron.d/cassy-backup on the WSL demo host. Same jobs as Docker/Backup/CassyBackup.cron;
+# purge goes through InvokeCompose.sh so the demo-vps override (staging) applies. Times are UTC.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-15 * * * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/backup_to_r2.sh' >> /var/log/mycaffe/backup.log 2>&1
+15 * * * * cassy flock -n /tmp/cassy-backup.lock bash -c 'set -a; . /etc/cassy/backup.env; set +a; /opt/cassy/CassyBackend/scripts/backup/BackupToR2.sh' >> /var/log/cassy/backup.log 2>&1
 
-30 20 2 * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/restore_drill.sh' >> /var/log/mycaffe/restore-drill.log 2>&1
+30 20 2 * * cassy flock -n /tmp/cassy-backup.lock bash -c 'set -a; . /etc/cassy/backup.env; set +a; /opt/cassy/CassyBackend/scripts/backup/InvokeRestoreDrill.sh' >> /var/log/cassy/restore-drill.log 2>&1
 
-0 20 * * * mycaffe flock -n /tmp/mycaffe-purge.lock bash -c 'export DEPLOY_COMPOSE_OVERRIDE=/opt/mycaffe/deploy/docker/docker-compose.demo-vps.yml; /opt/mycaffe/scripts/deploy/compose.sh run --rm --no-deps --entrypoint /app/mycaffe-migrate migrate -action=purge' >> /var/log/mycaffe/purge.log 2>&1
+0 20 * * * cassy flock -n /tmp/cassy-purge.lock bash -c 'export DEPLOY_COMPOSE_OVERRIDE=/opt/cassy/Docker/Core/DockerComposeDemoVps.yml; /opt/cassy/CassyBackend/scripts/deploy/InvokeCompose.sh run --rm --no-deps --entrypoint /app/cassy-migrate migrate -action=purge' >> /var/log/cassy/purge.log 2>&1
 
-*/5 * * * * mycaffe flock -n /tmp/mycaffe-health.lock bash -c 'curl -fsS --max-time 10 https://demo.abbdullaziz.online/health/ready >/dev/null || echo "$(date -u +\%Y-\%m-\%dT\%H:\%M:\%SZ) health/ready probe failed" >> /var/log/mycaffe/uptime.log'
+*/5 * * * * cassy flock -n /tmp/cassy-health.lock bash -c 'curl -fsS --max-time 10 https://demo.abbdullaziz.online/health/ready >/dev/null || echo "$(date -u +\%Y-\%m-\%dT\%H:\%M:\%SZ) health/ready probe failed" >> /var/log/cassy/uptime.log'

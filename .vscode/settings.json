@@ -5,8 +5,25 @@
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
   "[markdown]": {
-    "files.trimTrailingWhitespace": false
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.trimTrailingWhitespace": false,
+    "files.eol": "\n"
   },
+  "[powershell]": {
+    "editor.defaultFormatter": "ms-vscode.powershell",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "files.encoding": "utf8",
+    "files.eol": "\n"
+  },
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format",
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "files.eol": "\n"
+  },
+  "dotenv.enableAutocloaking": true,
+  "workbench.colorTheme": "Dracula Theme Soft",
   "markdownlint.config": {
     "default": true,
     "MD013": false,

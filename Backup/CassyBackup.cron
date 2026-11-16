@@ -1,15 +1,15 @@
-# /etc/cron.d/mycaffe-backup — install and env file: docs/Setup/BackupAndRestore.md
-# Runs as the `mycaffe` OS user (member of the docker group). Times are UTC.
-# /opt/mycaffe = checkout of the released tag (deploy/ and scripts/ only, never edited on the VPS).
-# /etc/mycaffe/backup.env = R2 + GPG settings, mode 600, owned by mycaffe.
+# /etc/cron.d/cassy-backup - install and env file: docs/Setup/BackupAndRestore.md
+# Runs as the `cassy` OS user (member of the docker group). Times are UTC.
+# /opt/cassy = workspace checkout of CassyBackend/scripts and Docker/Core (never edited on the VPS).
+# /etc/cassy/backup.env = R2 + GPG settings, mode 600, owned by cassy.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Hourly encrypted backup (RPO <= 1 h). flock skips a run if the previous one is still going.
-15 * * * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/backup_to_r2.sh' >> /var/log/mycaffe/backup.log 2>&1
+15 * * * * cassy flock -n /tmp/cassy-backup.lock bash -c 'set -a; . /etc/cassy/backup.env; set +a; /opt/cassy/CassyBackend/scripts/backup/BackupToR2.sh' >> /var/log/cassy/backup.log 2>&1
 
 # Monthly restore drill, 2nd of the month 20:30 UTC (03:30 WIB, outside opening hours).
-30 20 2 * * mycaffe flock -n /tmp/mycaffe-backup.lock bash -c 'set -a; . /etc/mycaffe/backup.env; set +a; /opt/mycaffe/scripts/backup/restore_drill.sh' >> /var/log/mycaffe/restore-drill.log 2>&1
+30 20 2 * * cassy flock -n /tmp/cassy-backup.lock bash -c 'set -a; . /etc/cassy/backup.env; set +a; /opt/cassy/CassyBackend/scripts/backup/InvokeRestoreDrill.sh' >> /var/log/cassy/restore-drill.log 2>&1
 
-# Daily purge of technical rows (P0-08, docs/Setup/Deploy.md §5), 20:00 UTC = 03:00 WIB.
-0 20 * * * mycaffe flock -n /tmp/mycaffe-purge.lock bash -c 'set -a; . /var/lib/mycaffe/deploy/current.env; set +a; docker compose -f /opt/mycaffe/deploy/docker/docker-compose.prod.yml run --rm --no-deps --entrypoint /app/mycaffe-migrate migrate -action=purge' >> /var/log/mycaffe/purge.log 2>&1
+# Daily purge of technical rows (P0-08, docs/Setup/Deploy.md), 20:00 UTC = 03:00 WIB.
+0 20 * * * cassy flock -n /tmp/cassy-purge.lock bash -c 'set -a; . /var/lib/cassy/deploy/current.env; set +a; docker compose -f /opt/cassy/Docker/Core/DockerComposeProd.yml run --rm --no-deps --entrypoint /app/cassy-migrate migrate -action=purge' >> /var/log/cassy/purge.log 2>&1

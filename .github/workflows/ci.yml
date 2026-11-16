@@ -14,6 +14,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secret-scan:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION=8.24.3
+          curl -sSLf "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+          curl -sSLf "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o /tmp/gitleaks_checksums.txt
+          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" /tmp/gitleaks_checksums.txt | sed "s/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz/\/tmp\/gitleaks.tar.gz/" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks git --verbose
+
   validate-compose-and-nginx:
     name: Validate Compose Stacks & Nginx Configs
     runs-on: ubuntu-latest
@@ -60,4 +78,4 @@ jobs:
           rm -f VpsGateway/.env.vps-gateway
 
       - name: Validate Postgres init script syntax
-        run: sh -n Postgres/00-init-roles.sh
+        run: sh -n Postgres/InitCassyRoles.sh

@@ -6,7 +6,7 @@ Standalone Docker, Nginx, PostgreSQL 18 Triple-Role, and VPS Gateway infrastruct
 - `Core/`: `DockerComposeDev.yml`, `DockerComposeDemo.yml`, `DockerComposeDemoVps.yml`, `DockerComposeProd.yml`
 - `VpsGateway/`: `DockerComposeVpsGateway.yml` (`CassyVpsRedis`, `CassyVpsN8n`, `CassyVpsHermesGateway` on `CassyMeshNet`)
 - `Nginx/`: `Nginx.conf`, `NginxDemo.conf`, `NginxProd.conf`, `Maintenance/`
-- `Postgres/`: `00-init-roles.sh` (`cassy_migrator`, `cassy_app` `NOBYPASSRLS`, `cassy_backup`)
+- `Postgres/`: `InitCassyRoles.sh` (`cassy_migrator`, `cassy_app` `NOBYPASSRLS`, `cassy_backup`)
 - `Monitoring/`: Grafana Alloy config & Prometheus alert rules
 - `Backup/`: Cron schedules (`CassyBackup.cron`, `CassyBackupDemo.cron`)
 - `Scripts/`: `ComposeControl.ps1`
