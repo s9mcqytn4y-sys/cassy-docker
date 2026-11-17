@@ -82,7 +82,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - /app/cassy-migrate -action=up -dir=/app/db/migrations && /app/cassy-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/cassy-migrate -action=demo-pins -store-slug=central-cafe,express-counter
+      - /app/cassy-migrate -action=up -dir=/app/db/migrations && /app/cassy-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/cassy-migrate -action=demo-pins -store-slug=central-cafe
     networks:
       - cassy-data
 
