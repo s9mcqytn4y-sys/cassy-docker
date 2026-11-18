@@ -65,6 +65,10 @@ services:
       dockerfile: deploy/docker/Dockerfile
     image: cassy-api:demo
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +93,10 @@ services:
   api:
     image: cassy-api:demo
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     logging: *default-logging
     depends_on:
       postgres:

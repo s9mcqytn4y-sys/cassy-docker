@@ -1,16 +1,17 @@
-// Grafana Alloy (decision IN3): scrape the API's internal /metrics and host metrics, remote-write to
-// Grafana Cloud. Alert rules: deploy/monitoring/alert-rules.yml. Setup: docs/Setup/Monitoring.md.
-// No docker.sock mount: container logs stay on the VPS (`docker compose logs`).
+// Grafana Alloy (decision IN3): scrape the API's internal /metrics and host metrics, process JSON
+// logs + OTLP traces, and remote-write to Grafana Cloud.
+// Alert rules: Docker/Monitoring/alert-rules.yml. Setup: docs/Setup/Monitoring.md.
+// No docker.sock mount: container logs stay on the VPS or in /var/log/cassy/*.log.
 
 prometheus.scrape "api" {
-	job_name        = "mycaffe-api"
+	job_name        = "cassy-api"
 	targets         = [{"__address__" = "api:9091"}]
 	scrape_interval = "30s"
 	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
 // Host disk/memory/CPU from read-only /proc, /sys and / mounts, plus the textfile metrics the backup
-// and restore-drill scripts write (mycaffe_backup_*, mycaffe_restore_drill_*).
+// and restore-drill scripts write (cassy_backup_*, cassy_restore_drill_*).
 prometheus.exporter.unix "host" {
 	procfs_path    = "/host/proc"
 	sysfs_path     = "/host/sys"
@@ -36,7 +37,7 @@ prometheus.scrape "host" {
 
 prometheus.remote_write "grafana_cloud" {
 	// One VPS per client (Model A): the client label tells alerts apart in the shared Grafana stack.
-	external_labels = {"client" = sys.env("MYCAFFE_CLIENT")}
+	external_labels = {"client" = coalesce(sys.env("CASSY_CLIENT"), sys.env("MYCAFFE_CLIENT"), "cassy-default")}
 
 	endpoint {
 		url = sys.env("GRAFANA_CLOUD_PROM_URL")
@@ -45,5 +46,94 @@ prometheus.remote_write "grafana_cloud" {
 			username = sys.env("GRAFANA_CLOUD_PROM_USER")
 			password = sys.env("GRAFANA_CLOUD_API_KEY")
 		}
+	}
+}
+
+// Structured JSON log pipeline (extracts level, request_id, trace_id, store_id without docker.sock).
+local.file_match "cassy_logs" {
+	path_targets = [{
+		__address__ = "localhost",
+		__path__    = "/host/textfile/*.log",
+		job         = "cassy-api",
+		client      = coalesce(sys.env("CASSY_CLIENT"), sys.env("MYCAFFE_CLIENT"), "cassy-default"),
+	}]
+}
+
+loki.source.file "cassy_api_logs" {
+	targets    = local.file_match.cassy_logs.targets
+	forward_to = [loki.process.cassy_json.receiver]
+}
+
+loki.process "cassy_json" {
+	stage.json {
+		expressions = {
+			level      = "level",
+			request_id = "request_id",
+			trace_id   = "trace_id",
+			store_id   = "store_id",
+			route      = "route",
+			status     = "status",
+		}
+	}
+
+	stage.labels {
+		values = {
+			level = "",
+		}
+	}
+
+	stage.structured_metadata {
+		values = {
+			request_id = "",
+			trace_id   = "",
+			store_id   = "",
+			route      = "",
+			status     = "",
+		}
+	}
+
+	forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+	endpoint {
+		url = coalesce(sys.env("GRAFANA_CLOUD_LOKI_URL"), "http://localhost:3100/loki/api/v1/push")
+
+		basic_auth {
+			username = coalesce(sys.env("GRAFANA_CLOUD_LOKI_USER"), sys.env("GRAFANA_CLOUD_PROM_USER"))
+			password = sys.env("GRAFANA_CLOUD_API_KEY")
+		}
+	}
+}
+
+// OpenTelemetry OTLP trace receiver on the isolated CassyMetricsNet network.
+otelcol.receiver.otlp "cassy_traces" {
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		traces = [otelcol.processor.batch.default.input]
+	}
+}
+
+otelcol.processor.batch "default" {
+	output {
+		traces = [otelcol.exporter.otlphttp.grafana_cloud.input]
+	}
+}
+
+otelcol.auth.basic "grafana_cloud" {
+	username = coalesce(sys.env("GRAFANA_CLOUD_OTLP_USER"), sys.env("GRAFANA_CLOUD_PROM_USER"))
+	password = sys.env("GRAFANA_CLOUD_API_KEY")
+}
+
+otelcol.exporter.otlphttp "grafana_cloud" {
+	client {
+		endpoint = coalesce(sys.env("GRAFANA_CLOUD_OTLP_URL"), "http://localhost:4318")
+		auth     = otelcol.auth.basic.grafana_cloud.handler
 	}
 }

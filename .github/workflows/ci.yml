@@ -55,6 +55,7 @@ jobs:
           EMAIL_FROM_ADDRESS: noreply@cassy.id
           SMTP_USERNAME: ci@cassy.id
           SMTP_PASSWORD: ci_smtp_password
+          CASSY_CLIENT: cassy-prod
           MYCAFFE_CLIENT: cassy-prod
           GRAFANA_CLOUD_PROM_URL: https://example.invalid
           GRAFANA_CLOUD_PROM_USER: ci
@@ -79,3 +80,10 @@ jobs:
 
       - name: Validate Postgres init script syntax
         run: sh -n Postgres/InitCassyRoles.sh
+
+      - name: Validate Prometheus alert rules
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/Monitoring:/monitoring:ro" \
+            -w /monitoring \
+            prom/prometheus:v3.2.1 test rules alert-rules.test.yml
