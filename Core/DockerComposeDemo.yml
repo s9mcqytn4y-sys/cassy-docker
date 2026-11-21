@@ -169,6 +169,37 @@ services:
       retries: 3
       start_period: 10s
 
+  web:
+    image: cassy-web:demo
+    build:
+      context: ${CASSY_CLIENT_DIR:-../../CassyClient}
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      BACKEND_INTERNAL_URL: "http://api:8080"
+      NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
+    networks:
+      - cassy-edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -177,11 +208,12 @@ services:
       - "127.0.0.1:${DEMO_HTTP_PORT:-8088}:80"
     volumes:
       - ../Nginx/NginxDemo.conf:/etc/nginx/nginx.conf:ro
-    # Next.js dev server runs on the Windows host (owner decision I3: one origin for POS + API).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       api:
+        condition: service_healthy
+      web:
         condition: service_healthy
     networks:
       - cassy-edge
