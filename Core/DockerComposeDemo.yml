@@ -194,7 +194,7 @@ services:
     networks:
       - cassy-edge
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
       interval: 15s
       timeout: 3s
       retries: 3
