@@ -1,4 +1,4 @@
-# Hostinger VPS 24/7 Gateway + Tailscale + Cloudflare Tunnel Guide
+﻿# Hostinger VPS 24/7 Gateway + Tailscale + Cloudflare Tunnel Guide
 
 Stack ini memisahkan jalur runtime agar demo/staging Cassy tidak mati saat laptop Windows 11 dimatikan (`HTTP 530` dari Cloudflare Tunnel).
 
@@ -21,7 +21,7 @@ Stack ini memisahkan jalur runtime agar demo/staging Cassy tidak mati saat lapto
    ```bash
    docker compose -f docker-compose.vps-gateway.yml --env-file .env.vps-gateway up -d
    ```
-4. Arahkan `cloudflared` tunnel di VPS ke `http://127.0.0.1:8080` (`/api/*`) dan `http://127.0.0.1:3000` (`/*`) sehingga `demo.abbdullaziz.online` aktif 24/7 dan `VARS.VPS_STRICT_UPTIME=true` bisa diaktifkan di GitHub Actions.
+4. Arahkan `cloudflared` tunnel di VPS ke `http://127.0.0.1:8080` (`/api/*`) dan `http://127.0.0.1:3000` (`/*`) sehingga `pos.abbdullaziz.online` aktif 24/7 dan `VARS.VPS_STRICT_UPTIME=true` bisa diaktifkan di GitHub Actions.
 
 ## 3. SCAMPER `/agentflow` Cron Hooks
 - **S (CI Failure Digest)**: Hermes memantau `gh run list --status failure` tiap jam dan meringkas root cause via Groq/Cerebras gratis.

@@ -148,7 +148,8 @@ services:
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cassy Demo}
       MIDTRANS_QRIS_ACQUIRER: ${MIDTRANS_QRIS_ACQUIRER:-gopay}
-      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://pos.abbdullaziz.online}
+      GUEST_SPLIT_ENABLED: ${GUEST_SPLIT_ENABLED:-true}
       DEFAULT_STORE_SLUG: ${DEFAULT_STORE_SLUG:-central-cafe}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
@@ -175,7 +176,7 @@ services:
       context: ${CASSY_CLIENT_DIR:-../../CassyClient}
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
+        NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL:-https://pos.abbdullaziz.online}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -190,7 +191,7 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       BACKEND_INTERNAL_URL: "http://api:8080"
-      NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL:-https://demo.abbdullaziz.online}
+      NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL:-https://pos.abbdullaziz.online}
     networks:
       - cassy-edge
     healthcheck:
@@ -227,7 +228,7 @@ services:
   tunnel:
     image: cloudflare/cloudflared:2026.10.2
     restart: unless-stopped
-    # Named Tunnel (mycaffe-demo -> https://demo.abbdullaziz.online) when CLOUDFLARE_TUNNEL_TOKEN is set.
+    # Named Tunnel (cassy-demo -> https://pos.abbdullaziz.online) when CLOUDFLARE_TUNNEL_TOKEN is set.
     # For an ephemeral Quick Tunnel without a token, set CLOUDFLARE_TUNNEL_COMMAND="--url http://nginx:80".
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
