@@ -13,5 +13,6 @@ Standalone Docker, Nginx, PostgreSQL 18 Triple-Role, and VPS Gateway infrastruct
 
 ## Container & Network Naming
 - Dev: `CassyPostgresDev`, `CassyApiDev`, `CassyNginxDev`, `CassyWaBridgeDev` on `CassyEdgeNet` + `CassyDataNet` (`CassyPgData`)
+- Demo (`Core/DockerComposeDemo.yml`, domain aktif `pos.abbdullaziz.online` & `api.abbdullaziz.online`, lokal `http://127.0.0.1:8088`): `cassy-demo-postgres-1`, `cassy-demo-redis-1`, `cassy-demo-api-1`, `cassy-demo-web-1`, `cassy-demo-nginx-1`, `cassy-demo-tunnel-1`
 - Prod: `CassyPostgresProd`, `CassyRedisProd`, `CassyMigrateProd`, `CassyApiProd`, `CassyWebProd`, `CassyNginxProd`, `CassyTunnelProd`, `CassyAlloyProd`
 - VPS Gateway: `CassyVpsRedis`, `CassyVpsN8n`, `CassyVpsHermesGateway` on `CassyMeshNet`

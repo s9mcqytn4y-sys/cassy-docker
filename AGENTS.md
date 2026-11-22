@@ -15,6 +15,7 @@ Application source code does NOT live here: Go backend lives in `CassyBackend`, 
 - **Least-privilege DB roles**: PostgreSQL runtime always runs via non-owner `cassy_app` (`NOBYPASSRLS`). Never weaken `Postgres/InitCassyRoles.sh` to grant superuser or `BYPASSRLS`.
 - **Network isolation**: Keep local development and VPS Gateway subnets isolated (`CassyEdgeNet`, `CassyDataNet`, `CassyMeshNet` on `172.29.20.0/24`) so they never collide with SaaS containers or local workstation ports.
 - **No secrets in git**: Never commit `.env`, `.env.vps-gateway`, certificates, or API tokens.
+- **Active demo domains**: Live demo runs on `https://pos.abbdullaziz.online` (PWA + Nginx proxy) and `https://api.abbdullaziz.online` (API); `demo.abbdullaziz.online` is retired. Ensure only one Cloudflare tunnel connector is active (`cassy-demo-tunnel-1`, with Windows `Cloudflared` service stopped/manual).
 - **No emoji or em dash**: Keep docs, compose comments, and CI logs clean.
 
 ## Verification Before Commit
