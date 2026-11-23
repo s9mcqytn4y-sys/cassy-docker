@@ -1,0 +1,138 @@
+# Cassy POS Platform - Automated test stack (Sprint S0, Docs/PRD/PrdOpsAndPwaClose.md section 6)
+#
+# Throwaway stack for CI and local e2e: Postgres on tmpfs, migrations + development seed,
+# the published API image from GHCR, Toxiproxy in front of the API (network fault injection),
+# and a virtual ESC/POS printer (escpos-sink). No tunnel, no Nginx, no real secrets.
+#
+# Host ports (chosen to avoid the demo stack on 8088):
+#   18080  API through Toxiproxy (clients and tests use this)
+#   8474   Toxiproxy admin API
+#   9100   virtual printer (ESC/POS over TCP, Android emulator reaches it at 10.0.2.2:9100)
+#   9101   printer job API (GET /jobs, DELETE /jobs)
+#
+# Usage:
+#   CASSY_BACKEND_DIR=../../CassyBackend docker compose -f Core/DockerComposeTest.yml up -d --wait
+#   docker compose -f Core/DockerComposeTest.yml down -v
+#
+# CASSY_API_IMAGE pins the API build under test (default: latest main from GHCR).
+# All credentials below are fixed test values for a disposable database, never reuse them.
+
+name: cassy-test
+
+x-test-db: &test-db
+  DB_NAME: cassy_test
+  DB_APP_USER: cassy_app
+  DB_APP_PASSWORD: cassy-test-app-password
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: cassy_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: cassy-test-super-password
+      DB_MIGRATOR_USER: cassy_migrator
+      DB_MIGRATOR_PASSWORD: cassy-test-migrator-password
+      DB_APP_USER: cassy_app
+      DB_APP_PASSWORD: cassy-test-app-password
+    tmpfs:
+      - /var/lib/postgresql
+    volumes:
+      - ../Postgres/InitCassyRoles.sh:/docker-entrypoint-initdb.d/00-init-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cassy_migrator -d cassy_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  migrate:
+    image: ${CASSY_API_IMAGE:-ghcr.io/s9mcqytn4y-sys/cassy-api:main}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *test-db
+      APP_ENV: staging
+      DATABASE_MIGRATION_URL: postgres://cassy_migrator:cassy-test-migrator-password@postgres:5432/cassy_test?sslmode=disable
+      DEMO_OWNER_PIN: "739164"
+      DEMO_STAFF_PIN: "528307"
+    volumes:
+      - ${CASSY_BACKEND_DIR:-../../CassyBackend}/db/seeds:/app/db/seeds:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /app/cassy-migrate -action=up -dir=/app/db/migrations && /app/cassy-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/cassy-migrate -action=demo-pins -store-slug=central-cafe
+
+  api:
+    image: ${CASSY_API_IMAGE:-ghcr.io/s9mcqytn4y-sys/cassy-api:main}
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *test-db
+      PORT: "8080"
+      APP_ENV: staging
+      REDIS_ADDR: redis:6379
+      DATABASE_URL: postgres://cassy_app:cassy-test-app-password@postgres:5432/cassy_test?sslmode=disable
+      JWT_SECRET_KEY: cassy-test-only-jwt-signing-value-not-secret
+      FRONTEND_URL: http://127.0.0.1:3000
+      ALLOWED_ORIGINS: http://127.0.0.1:3000,http://localhost:3000
+      APP_PUBLIC_URL: http://127.0.0.1:3000
+      MIDTRANS_IS_PRODUCTION: "false"
+      MIDTRANS_MERCHANT_ID: G000000000
+      MIDTRANS_SERVER_KEY: SB-Mid-server-demo-placeholder
+      MIDTRANS_CLIENT_KEY: SB-Mid-client-demo-placeholder
+      EMAIL_DRIVER: log
+      SMS_DRIVER: disabled
+      WHATSAPP_DRIVER: disabled
+      STORAGE_DRIVER: local
+      GUEST_SPLIT_ENABLED: "true"
+      DEFAULT_STORE_SLUG: central-cafe
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    command: ["-host=0.0.0.0", "-config=/config/ToxiproxyConfig.json"]
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ../Test/ToxiproxyConfig.json:/config/ToxiproxyConfig.json:ro
+    ports:
+      - "18080:18080"
+      - "8474:8474"
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  escpos-sink:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/sink/EscposSink.py"]
+    volumes:
+      - ../Test/EscposSink.py:/sink/EscposSink.py:ro
+    ports:
+      - "9100:9100"
+      - "9101:9101"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
