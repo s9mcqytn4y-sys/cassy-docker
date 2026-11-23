@@ -1,6 +1,7 @@
 # Cassy POS Platform - Automated test stack (Sprint S0, Docs/PRD/PrdOpsAndPwaClose.md section 6)
 #
-# Throwaway stack for CI and local e2e: Postgres on tmpfs, migrations + development seed,
+# Throwaway stack for CI and local e2e: Postgres on tmpfs, migrations + development seed
+# + the e2e-kasir lifecycle store (db/seeds/E2eLifecycle.sql, when the backend has it),
 # the published API image from GHCR, Toxiproxy in front of the API (network fault injection),
 # and a virtual ESC/POS printer (escpos-sink). No tunnel, no Nginx, no real secrets.
 #
@@ -71,7 +72,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - /app/cassy-migrate -action=up -dir=/app/db/migrations && /app/cassy-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/cassy-migrate -action=demo-pins -store-slug=central-cafe
+      - /app/cassy-migrate -action=up -dir=/app/db/migrations && /app/cassy-migrate -action=seed -seed-file=/app/db/seeds/development.sql && /app/cassy-migrate -action=demo-pins -store-slug=central-cafe && if [ -f /app/db/seeds/E2eLifecycle.sql ]; then /app/cassy-migrate -action=seed -seed-file=/app/db/seeds/E2eLifecycle.sql; fi
 
   api:
     image: ${CASSY_API_IMAGE:-ghcr.io/s9mcqytn4y-sys/cassy-api:main}
