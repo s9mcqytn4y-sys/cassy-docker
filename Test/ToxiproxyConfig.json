@@ -4,5 +4,11 @@
     "listen": "0.0.0.0:18080",
     "upstream": "api:8080",
     "enabled": true
+  },
+  {
+    "name": "cassy_api_direct",
+    "listen": "0.0.0.0:18081",
+    "upstream": "api:8080",
+    "enabled": true
   }
 ]

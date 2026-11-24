@@ -117,6 +117,8 @@ services:
       - ../Test/ToxiproxyConfig.json:/config/ToxiproxyConfig.json:ro
     ports:
       - "18080:18080"
+      # Never toggled by tests: lets a test create orders while cassy_api is cut (S3-Q2).
+      - "18081:18081"
       - "8474:8474"
     healthcheck:
       test: ["CMD", "/toxiproxy-cli", "list"]
