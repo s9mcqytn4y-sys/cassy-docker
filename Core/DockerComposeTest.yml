@@ -11,6 +11,7 @@
 #   9100   virtual printer (ESC/POS over TCP, Android emulator reaches it at 10.0.2.2:9100)
 #   9101   printer job API (GET /jobs, DELETE /jobs)
 #   9200   fake Midtrans (tests settle charges: POST /_stub/charges/<order_id>/settle)
+#   18090  production Nginx (NginxProd.conf) in front of the API, for the PWA-08 k6 menu load test
 #
 # Usage:
 #   CASSY_BACKEND_DIR=../../CassyBackend docker compose -f Core/DockerComposeTest.yml up -d --wait
@@ -176,6 +177,24 @@ services:
       - "9200:9200"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9200/_stub/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # PWA-08 (S5-Q3): the production Nginx config in front of the API, so the k6 menu load test measures
+  # the real rate limits and micro-cache. The web container is optional in that config.
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ../Nginx/NginxProd.conf:/etc/nginx/nginx.conf:ro
+      - ../Nginx/Maintenance:/etc/nginx/maintenance:ro
+    ports:
+      - "18090:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
       interval: 3s
       timeout: 3s
       retries: 10
