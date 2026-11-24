@@ -126,6 +126,24 @@ services:
       timeout: 3s
       retries: 10
 
+  # Cup labels (S4-Q3): the real print agent claims TSPL jobs from the API and prints them on the sink.
+  # Built from the backend checkout at start-up; the token matches the e2e seed's label printer.
+  print-agent:
+    image: golang:1.27-alpine
+    working_dir: /src
+    command: ["go", "run", "./cmd/print-agent", "-config", "/config/PrintAgentTest.json"]
+    environment:
+      GOFLAGS: -mod=mod
+      CGO_ENABLED: "0"
+    volumes:
+      - ${CASSY_BACKEND_DIR:-../../CassyBackend}:/src:ro
+      - ../Test/PrintAgentTest.json:/config/PrintAgentTest.json:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      escpos-sink:
+        condition: service_healthy
+
   escpos-sink:
     image: python:3.12-alpine
     command: ["python", "-u", "/sink/EscposSink.py"]
