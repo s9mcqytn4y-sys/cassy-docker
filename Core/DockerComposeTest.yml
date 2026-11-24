@@ -10,6 +10,7 @@
 #   8474   Toxiproxy admin API
 #   9100   virtual printer (ESC/POS over TCP, Android emulator reaches it at 10.0.2.2:9100)
 #   9101   printer job API (GET /jobs, DELETE /jobs)
+#   9200   fake Midtrans (tests settle charges: POST /_stub/charges/<order_id>/settle)
 #
 # Usage:
 #   CASSY_BACKEND_DIR=../../CassyBackend docker compose -f Core/DockerComposeTest.yml up -d --wait
@@ -81,6 +82,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      midtrans-stub:
+        condition: service_healthy
     environment:
       <<: *test-db
       PORT: "8080"
@@ -95,6 +98,8 @@ services:
       MIDTRANS_MERCHANT_ID: G000000000
       MIDTRANS_SERVER_KEY: SB-Mid-server-demo-placeholder
       MIDTRANS_CLIENT_KEY: SB-Mid-client-demo-placeholder
+      # S4-Q8: every Midtrans call goes to the stub below (the API refuses this in production).
+      MIDTRANS_API_BASE_URL: http://midtrans-stub:9200
       EMAIL_DRIVER: log
       SMS_DRIVER: disabled
       WHATSAPP_DRIVER: disabled
@@ -154,6 +159,23 @@ services:
       - "9101:9101"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # Fake Midtrans Core API (S4-Q8): charges stay pending until a test settles them, then a webhook
+  # signed with the charge's own server key goes to the API, like the real provider.
+  midtrans-stub:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/stub/MidtransStub.py"]
+    environment:
+      WEBHOOK_URL: http://api:8080/api/v1/payments/midtrans/webhook
+    volumes:
+      - ../Test/MidtransStub.py:/stub/MidtransStub.py:ro
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9200/_stub/health')"]
       interval: 3s
       timeout: 3s
       retries: 10
