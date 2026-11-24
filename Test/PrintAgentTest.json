@@ -1,0 +1,11 @@
+{
+  "api_url": "http://api:8080",
+  "poll_seconds": 1,
+  "printers": [
+    {
+      "name": "Label Cup Uji",
+      "token": "e2e00000-0000-4000-8000-000000000001.e2e00050-0000-4000-8000-000000000003.e2e-label-agent-secret-for-the-test-stack-x",
+      "address": "escpos-sink:9100"
+    }
+  ]
+}
